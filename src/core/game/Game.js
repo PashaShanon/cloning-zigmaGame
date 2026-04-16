@@ -42,10 +42,8 @@ export class Game {
     this.nearbyEnemy = null;
     
     // Camera state
-    this.cameraX = 0;
-    this.cameraY = 0;
-    this.cameraZoom = 1.0;
     this.isAdminMode = false;
+    this.gameLoopId = null;
     
     this.init();
   }
@@ -103,16 +101,25 @@ export class Game {
 
   updateCamera() {
     if (this.isAdminMode) {
-      // Zoom out to see the whole map
-      const mapWidth = this.map.width * this.map.tileSize * this.map.scale;
-      const mapHeight = this.map.height * this.map.tileSize * this.map.scale;
+      if (!this.map.ready || this.map.width === 0) {
+          this.cameraZoom = 1.0;
+          this.cameraX = 0;
+          this.cameraY = 0;
+          return;
+      }
+
+      const mapW = (this.map.width * this.map.tileSize * this.map.scale);
+      const mapH = (this.map.height * this.map.tileSize * this.map.scale);
       
-      // Calculate zoom to fit map perfectly in the view
       const padding = 100;
-      this.cameraZoom = Math.min(this.canvas.width / (mapWidth + padding), this.canvas.height / (mapHeight + padding), 0.35);
+      const zoomX = this.canvas.width / (mapW + padding);
+      const zoomY = this.canvas.height / (mapH + padding);
       
-      this.cameraX = mapWidth / 2 - (this.canvas.width / 2) / this.cameraZoom;
-      this.cameraY = mapHeight / 2 - (this.canvas.height / 2) / this.cameraZoom;
+      this.cameraZoom = Math.min(zoomX, zoomY, 0.45);
+      if (this.cameraZoom < 0.1) this.cameraZoom = 0.1;
+      
+      this.cameraX = (mapW - this.canvas.width / this.cameraZoom) / 2;
+      this.cameraY = (mapH - this.canvas.height / this.cameraZoom) / 2;
       return;
     }
 
@@ -207,21 +214,28 @@ export class Game {
   }
 
   startMultiplayer() {
+    console.log("[Game] Starting Multiplayer Mode as Admin:", this.isAdminMode);
     this.score = 0;
     this.correctAnswersCount = 0;
     this.answeredQuestionsCount = 0;
     this.isInLobby = false;
+    this.isRunning = false;
 
-    const spawnItems = () => {
+    const waitForMap = () => {
+      // Ensure map is loaded if it's still the default/unset or mismatched
+      if (this.mapName !== '-' && this.map.currentMapName !== this.mapName) {
+        this.map.loadMap(this.mapName);
+      }
+
       if (this.map.ready) {
-        const safePos = this.findSafeSpawnPoint();
-        if (this.player) this.player.resetPosition(safePos.x, safePos.y);
+        console.log("[Game] Multiplayer map ready, starting game execution");
         this.isRunning = true;
       } else {
-        setTimeout(spawnItems, 100);
+        setTimeout(waitForMap, 100);
       }
     };
-    spawnItems();
+    
+    waitForMap();
   }
 
   initEnemies() {
@@ -279,13 +293,17 @@ export class Game {
       }
       
       if (this.multiplayer.isConnected) {
-        this.multiplayer.updateRemotePlayers();
         const now = Date.now();
         if (now - this.lastNetworkUpdate > this.networkUpdateRate) {
           this.multiplayer.sendPosition(this.player.x, this.player.y, this.player.baseFrame, this.player.isMoving);
           this.lastNetworkUpdate = now;
         }
       }
+    }
+
+    // Update remote players even if we don't have a local character (e.g. Host/Spectator)
+    if (this.multiplayer.isConnected) {
+      this.multiplayer.updateRemotePlayers();
     }
     
     this.enemies.forEach(enemy => {
@@ -372,7 +390,8 @@ export class Game {
   }
 
   draw() {
-    this.ctx.fillStyle = "#1a1a1a";
+    // Clear background to a neutral dark color to contrast with green map
+    this.ctx.fillStyle = "#121212";
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     
     this.ctx.save();
@@ -391,8 +410,8 @@ export class Game {
     if (this.nearbyEnemy) this.nearbyEnemy.isNearby = false;
     
     if (this.multiplayer.remotePlayers) {
-      this.multiplayer.remotePlayers.forEach((p) => {
-          this.multiplayer.drawRemotePlayer(this.ctx, p);
+      this.multiplayer.remotePlayers.forEach((p, id) => {
+          this.multiplayer.drawRemotePlayer(this.ctx, p, id);
       });
     }
     
@@ -424,9 +443,14 @@ export class Game {
   }
 
   gameLoop () {
-    this.update();
-    this.draw();
-    requestAnimationFrame(() => this.gameLoop());
+    if (this.gameLoopId) cancelAnimationFrame(this.gameLoopId);
+    
+    const loop = () => {
+        this.update();
+        this.draw();
+        this.gameLoopId = requestAnimationFrame(loop);
+    };
+    this.gameLoopId = requestAnimationFrame(loop);
   }
 }
 

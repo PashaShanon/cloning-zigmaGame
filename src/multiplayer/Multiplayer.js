@@ -19,6 +19,7 @@ export class MultiplayerManager {
         this.sessionId = null;
         this.roomCode = null;
         this.isHost = false;
+        this.isAdmin = false;
         this.isConnected = false;
         /** @type {Map<string, {x,y,name,baseFrame,isMoving,score}>} */
         this.remotePlayers = new Map();
@@ -53,11 +54,14 @@ export class MultiplayerManager {
             roomCode: roomCode, // Crucial for filtering
             maxQuestions: options.maxQuestions || 5,
             mapName:      options.mapName      || "map.tmx",
-            timeLimit:    options.timeLimit    || 5
+            timeLimit:    options.timeLimit    || 5,
+            isHost:       true // Explicitly joining as dedicated host
         });
         
         console.log(`[MP] Room created with code: ${roomCode}`);
         this.roomCode = roomCode;
+        this.room.sessionId = this.room.sessionId; // Trigger getter
+        this.sessionId = this.room.sessionId;
         this.isHost = true;
         this._setupListeners();
         return this.room.roomId;
@@ -72,9 +76,11 @@ export class MultiplayerManager {
         // Join using the filterBy criteria set on the server
         this.room = await this.client.join("game_room", { 
             roomCode: codeToFind, 
-            name: playerName 
+            name: playerName,
+            isHost: false // Explicitly joining as a player
         });
         
+        this.sessionId = this.room.sessionId;
         this.isHost = false;
         this._setupListeners();
         return this.room.roomId;
@@ -98,6 +104,7 @@ export class MultiplayerManager {
             this.sessionId = this.room.sessionId; // Use authoritative ID
             this.roomCode  = data.roomCode;
             this.isHost    = data.isHost;
+            this.isAdmin   = data.isAdmin;
             this.game.uiManager.onRoomJoined(this.roomCode, this.isHost, data);
         });
 
@@ -118,6 +125,12 @@ export class MultiplayerManager {
                 const wasHost = this.isHost;
                 this.isHost = (this.sessionId === state.hostId);
                 
+                // Track admin separately from game/state.adminId if needed, 
+                // but for now we use the initial data.
+                if (state.adminId) {
+                   this.isAdmin = (this.sessionId === state.adminId);
+                }
+
                 // If host status changed, notify UI
                 if (wasHost !== this.isHost) {
                    this.game.uiManager.onHostChanged(this.isHost);
@@ -153,8 +166,8 @@ export class MultiplayerManager {
         room.onMessage("game_start", () => {
             this.game.uiManager.hideLobby();
             this.game.uiManager.showPreGameCountdown(() => {
-                // Determine view based on host status
-                if (this.isHost) {
+                // Determine view based on host/admin status
+                if (this.isAdmin) {
                    this.game.uiManager.navigateTo('/host/progress');
                 } else {
                    this.game.uiManager.navigateTo('/game');
@@ -276,20 +289,32 @@ export class MultiplayerManager {
             return;
         }
 
-        // Filter out any undefined or null players
+        // AUTHORITATIVE ID SYNC
+        const currentSessionId = this.sessionId || this.room?.sessionId;
+        if (!currentSessionId) return;
+
+        // Ensure we don't accidentally render ourselves as a remote player
+        this.remotePlayers.delete(currentSessionId);
+
         const validEntries = entries.filter(([, p]) => p && typeof p === "object");
-
         for (const [id, p] of validEntries) {
-            if (!p) continue;
             currentKeys.add(id);
-
-            // SAFE: Check if p.name exists before using it
             const playerName = p.name || `Player_${id.substring(0, 4)}`;
-            const currentSessionId = this.sessionId || this.room?.sessionId;
-            
+
             if (id === currentSessionId) {
+                // Dedicated hosts / admins should NOT have a local player character sprite
+                // Check both local flag and data from server if available
+                if (this.isAdmin || p.isAdmin || this.isHost) {
+                    if (this.game.player) {
+                        console.log("[MP] Cleaning up unintended local player for Admin");
+                        this.game.player = null; 
+                    }
+                    continue;
+                }
+
                 // Initialize LOCAL player if null
                 if (!this.game.player) {
+                    console.log("[MP] Creating local player for session:", id);
                     this.game.player = new Player(p.x ?? 400, p.y ?? 300);
                     this.game.player.name = playerName;
                     this.game.player.setMultiplayerManager(this);
@@ -298,7 +323,6 @@ export class MultiplayerManager {
                 // AUTHORITATIVE POSITION SYNC (Smoothed)
                 this.game.player.targetX = p.x;
                 this.game.player.targetY = p.y;
-                this.game.player.baseFrame = 0; // Ignore server baseFrame
                 this.game.player.isMoving  = p.isMoving;
                 this.game.player.facingLeft = p.facingLeft;
                 
@@ -308,7 +332,7 @@ export class MultiplayerManager {
                 }
                 continue;
             }
-
+            
             const existing = this.remotePlayers.get(id);
             if (existing) {
                 // Update SERVER TARGET positions (not render positions)

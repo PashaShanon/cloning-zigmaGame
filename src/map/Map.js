@@ -30,6 +30,7 @@ export class Map {
     this.ctx = this.offscreenCanvas.getContext('2d');
     this.ctx.imageSmoothingEnabled = false; 
     
+    this.currentMapName = '-';
     this.width = 0;
     this.height = 0;
     this.collisionObjects = []; 
@@ -47,6 +48,7 @@ export class Map {
 
   loadMap(mapName) {
     const data = MAPS[mapName] || MAPS['map.tmx'];
+    this.currentMapName = mapName;
     this.ready = false;
     this.collisionObjects = [];
     initMap(this, data);

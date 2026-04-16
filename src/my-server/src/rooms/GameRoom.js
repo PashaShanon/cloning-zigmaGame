@@ -93,6 +93,7 @@ class GameState extends Schema {
         this.currentQuestion = null;
         this.questionStartTime = 0;
         this.hostId = "";
+        this.adminId = "";
         this.clock = 0;
         this.mapName = "map.tmx";
     }
@@ -102,6 +103,7 @@ type("boolean")(GameState.prototype, "gameStarted");
 type(QuestionState)(GameState.prototype, "currentQuestion"); 
 type("number")(GameState.prototype, "questionStartTime");
 type("string")(GameState.prototype, "hostId");
+type("string")(GameState.prototype, "adminId");
 type("number")(GameState.prototype, "clock");
 type("string")(GameState.prototype, "mapName");
 type({ map: Player })(GameState.prototype, "players");
@@ -329,6 +331,7 @@ export class GameRoom extends Room {
                 sessionId: client.sessionId,
                 roomCode: this.roomCode,
                 isHost: isHost,
+                isAdmin: client.sessionId === this.state.adminId,
                 maxQuestions: this.maxQuestions,
                 difficulty: this.difficulty,
                 timeLimit: this.timeLimit || 5 
@@ -668,10 +671,22 @@ export class GameRoom extends Room {
             const safeName = options && options.name ? options.name : "UNKNOWN";
             console.log(`[GameRoom] Player ${safeName} (ID: ${client.sessionId}) joining room ${this.roomId}`);
             
-            // Set first player as host if no host yet
-            if (!this.state.hostId) {
+            const isDedicatedHost = options && options.isHost === true;
+            
+            // Set first player as host if no host yet, OR if specifically joining as host
+            if (isDedicatedHost) {
                 this.state.hostId = client.sessionId;
-                console.log(`[GameRoom] Host assigned: ${this.state.hostId}`);
+                this.state.adminId = client.sessionId;
+                console.log(`[GameRoom] Dedicated Host assigned: ${this.state.hostId} (Spectator)`);
+                
+                // Send specific joined info to host immediately or wait for join_ready
+                return; // Host does not join as a player character
+            }
+
+            // If no host assigned yet (player joined first?), assign them as owner but they are still a player
+            if (!this.state.hostId) {
+                this.state.hostId = client.sessionId; 
+                console.log(`[GameRoom] First Player assigned as Host/Owner: ${this.state.hostId}`);
             }
 
             // Create player

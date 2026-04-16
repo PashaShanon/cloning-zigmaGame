@@ -319,7 +319,8 @@ export class UIManager {
 
     const qrEl = document.getElementById('lobby-qr-code');
     if (qrEl) {
-      qrEl.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(window.location.href)}`;
+      const currentUrl = window.location.origin + `/host/${roomCode}/lobby`;
+      qrEl.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(currentUrl)}`;
     }
 
     this.onHostChanged(isHost);
@@ -372,15 +373,47 @@ export class UIManager {
       this.lobbyPlayersList.appendChild(li);
     });
 
-    // Auto-enable start button if 2+ players or debug mode
+    // Auto-enable start button if at least 1 player is inside
     if (hostId === mySessionId) {
-        if (players.length >= 1) { // Normalnya >= 2, tapi untuk testing >= 1
+        if (players.length >= 1) {
             this.lobbyStartBtn.disabled = false;
             this.lobbyStartBtn.style.background = '#4CAF50';
             this.lobbyStartBtn.style.color = '#fff';
             this.lobbyStartBtn.style.cursor = 'pointer';
+        } else {
+            this.lobbyStartBtn.disabled = true;
+            this.lobbyStartBtn.style.background = 'rgba(255,255,255,0.1)';
+            this.lobbyStartBtn.style.color = 'rgba(255,255,255,0.3)';
+            this.lobbyStartBtn.style.cursor = 'not-allowed';
         }
     }
+    
+    // Also update Host Monitoring if in Admin mode
+    if (this.game.isAdminMode) {
+        this.updateHostMonitoring(players);
+    }
+  }
+
+  updateHostMonitoring(players) {
+    const monitoringList = document.getElementById('host-players-monitoring');
+    const monCount = document.getElementById('host-mon-count');
+    if (!monitoringList) return;
+
+    if (monCount) monCount.textContent = players.length;
+    monitoringList.innerHTML = '';
+    
+    players.forEach(p => {
+        const item = document.createElement('div');
+        item.className = 'monitoring-item';
+        item.innerHTML = `
+            <div style="display:flex; align-items:center;">
+                <div class="mon-indicator"></div>
+                <div class="mon-name">${p.name}</div>
+            </div>
+            <div class="mon-score">${p.score || 0} PTS</div>
+        `;
+        monitoringList.appendChild(item);
+    });
   }
 
   hideLobby() {
