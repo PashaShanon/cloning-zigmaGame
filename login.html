@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login - Prototype Game</title>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/styles/style.css">
+  <style>
+    body {
+      background-color: rgba(105, 191, 81); /* Mengikuti warna start-modal */
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+  
+  <div class="modal-content" style="max-width: 350px;">
+    <h1 style="color: #4CAF50; text-shadow: 2px 2px 0px #000; font-size: 1.8rem; margin-bottom: 20px;">LOGIN</h1>
+
+    <div class="name-entry-section" style="margin-top:0;">
+      <button type="button" class="option-btn action-btn-multi" id="google-login-btn" style="width: 100%; border-color: #2196F3; color: #0d47a1; display:flex; justify-content:center; align-items:center; gap: 10px; margin-bottom: 20px; font-size: 12px !important;">
+        <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="G" style="width:16px;">
+        LOGIN GOOGLE
+      </button>
+
+      <hr style="border: 2px solid #000;" class="main-hr">
+      <div style="text-align: center; margin: -36px auto 20px auto; font-size: 10px; color: #000; background: #fff; width: max-content; padding: 0 10px; font-weight: bold;">ATAU</div>
+
+      <form id="login-form">
+        <label>EMAIL / USERNAME</label>
+        <input type="text" id="email" placeholder="contoh@gmail.com" required style="margin-bottom: 15px;">
+        
+        <label>PASSWORD</label>
+        <input type="password" id="password" placeholder="••••••••" required style="margin-bottom: 20px;">
+
+        <button type="submit" class="option-btn action-btn-multi" style="width: 100%; border-color: #4CAF50; color: #1b5e20; font-size: 14px !important;">
+           LOGIN
+        </button>
+      </form>
+
+      <div style="margin-top: 25px; font-size: 8px; text-align: center; color: #333;">
+        BELUM PUNYA AKUN? <a href="/register.html" style="color: #2196F3; text-decoration: none; font-weight: bold; border-bottom: 1px solid #2196F3; padding-bottom: 2px;">REGISTER</a>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    document.getElementById('login-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      
+      const email = document.getElementById('email').value;
+      // Gunakan string sebelum @ sebagai username (max 10 huruf, huruf besar)
+      const username = email.split('@')[0].substring(0, 10).toUpperCase();
+      
+      localStorage.setItem('playerName', username);
+      window.location.href = '/';
+    });
+
+    document.getElementById('google-login-btn').addEventListener('click', () => {
+      // Mock Google Login
+      const mockGoogleName = "GOOGLE_USR";
+      localStorage.setItem('playerName', mockGoogleName);
+      window.location.href = '/';
+    });
+  </script>
+</body>
+</html>

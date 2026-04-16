@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Joystick Logic Scratchpad</title>
+    <!-- Modern NippleJS for mobile analog controls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.10.1/nipplejs.min.js"></script>
+    <style>
+        :root {
+            --primary: #4CAF50;
+            --bg: #0f172a;
+            --card: #1e293b;
+            --text: #f8fafc;
+        }
+        body {
+            margin: 0;
+            font-family: 'Inter', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .container {
+            background: var(--card);
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+        }
+        h1 { font-size: 1.5rem; margin-bottom: 1.5rem; color: var(--primary); }
+        
+        .visualizer {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.5rem;
+            margin-bottom: 2rem;
+        }
+        .key {
+            background: #334155;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            font-weight: bold;
+            transition: all 0.2s;
+            opacity: 0.3;
+        }
+        .key.active {
+            opacity: 1;
+            background: var(--primary);
+            box-shadow: 0 0 15px var(--primary);
+            transform: scale(1.1);
+        }
+
+        #joystick-area {
+            width: 200px;
+            height: 200px;
+            background: rgba(255,255,255,0.05);
+            border: 2px dashed #475569;
+            border-radius: 50%;
+            margin: 0 auto;
+            position: relative;
+        }
+        
+        .stats {
+            margin-top: 1.5rem;
+            font-family: monospace;
+            font-size: 0.8rem;
+            background: #000;
+            padding: 0.5rem;
+            border-radius: 0.4rem;
+            text-align: left;
+        }
+        .stat-val { color: var(--primary); }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Joystick Logic Test</h1>
+        
+        <div class="visualizer">
+            <div></div> <div id="v-up" class="key">W</div> <div></div>
+            <div id="v-left" class="key">A</div> <div id="v-down" class="key">S</div> <div id="v-right" class="key">D</div>
+        </div>
+
+        <div id="joystick-area"></div>
+
+        <div class="stats">
+            <div>ANGLE: <span id="s-angle" class="stat-val">0</span>°</div>
+            <div>FORCE: <span id="s-force" class="stat-val">0.00</span></div>
+            <div>DIR:   <span id="s-dir" class="stat-val">NONE</span></div>
+        </div>
+    </div>
+
+    <script>
+        const keys = {
+            up: document.getElementById('v-up'),
+            down: document.getElementById('v-down'),
+            left: document.getElementById('v-left'),
+            right: document.getElementById('v-right')
+        }
+        
+        const stats = {
+            angle: document.getElementById('s-angle'),
+            force: document.getElementById('s-force'),
+            dir: document.getElementById('s-dir')
+        }
+
+        const manager = nipplejs.create({
+            zone: document.getElementById('joystick-area'),
+            mode: 'static',
+            position: { left: '50%', top: '50%' },
+            color: '#4CAF50',
+            size: 150
+        });
+
+        manager.on('move', (evt, data) => {
+            const angle = data.angle?.degree || 0;
+            const force = data.force || 0;
+            
+            stats.angle.innerText = Math.round(angle);
+            stats.force.innerText = force.toFixed(2);
+
+            if (force < 0.2) {
+                clearAll();
+                stats.dir.innerText = "IDLE";
+                return;
+            }
+
+            // MAPPING LOGIC (Angle-based)
+            // Defined in Conversation 4e3732fc
+            const isUp = angle > 22.5 && angle < 157.5;
+            const isDown = angle > 202.5 && angle < 337.5;
+            const isLeft = angle > 112.5 && angle < 247.5;
+            const isRight = angle < 67.5 || angle > 292.5;
+
+            keys.up.classList.toggle('active', isUp);
+            keys.down.classList.toggle('active', isDown);
+            keys.left.classList.toggle('active', isLeft);
+            keys.right.classList.toggle('active', isRight);
+
+            const activeStrs = [];
+            if (isUp) activeStrs.push("UP");
+            if (isDown) activeStrs.push("DOWN");
+            if (isLeft) activeStrs.push("LEFT");
+            if (isRight) activeStrs.push("RIGHT");
+            stats.dir.innerText = activeStrs.join(" + ");
+        });
+
+        manager.on('end', () => {
+            clearAll();
+            stats.angle.innerText = "0";
+            stats.force.innerText = "0.00";
+            stats.dir.innerText = "NONE";
+        });
+
+        function clearAll() {
+            Object.values(keys).forEach(k => k.classList.remove('active'));
+        }
+    </script>
+</body>
+</html>
