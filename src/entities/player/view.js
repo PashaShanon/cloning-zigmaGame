@@ -15,6 +15,8 @@ export function drawCharacterSprite(ctx, x, y, config = {}) {
         idleFrames = 9,
         runFrames = 8,
         score = null,
+        correct = 0,
+        maxQuestions = 5,
         zoom = 1.0
     } = config;
 
@@ -30,10 +32,14 @@ export function drawCharacterSprite(ctx, x, y, config = {}) {
       const currentFrame = (animFrame % maxFrames);
       const srcX = (currentBaseFrame + currentFrame) * frameWidth;
       
-      const dw = frameWidth * GAME_CONFIG.SCALE;
-      const dh = frameHeight * GAME_CONFIG.SCALE;
+      // Ensure player is visible even when zoomed out (Host POV)
+      // We counteract the global camera zoom by increasing the local draw scale
+      const zoomFactor = (zoom < 1.0) ? (1.0 / zoom) : 1.0;
+      const dw = frameWidth * GAME_CONFIG.SCALE * zoomFactor;
+      const dh = frameHeight * GAME_CONFIG.SCALE * zoomFactor;
 
       ctx.save();
+      // Use crisp pixels even when scaled up
       ctx.imageSmoothingEnabled = false;
       
       // Implement FLIP if facingLeft
@@ -56,22 +62,53 @@ export function drawCharacterSprite(ctx, x, y, config = {}) {
           );
       }
 
-      // Label - Scale font based on zoom to keep it readable
-      // Use a minimum scale to ensure visibility on minimap
-      const scaleFactorLabel = Math.max(1, 0.4 / zoom); 
-      const baseFontSize = (10 * GAME_CONFIG.SCALE/2);
-      ctx.font = `bold ${baseFontSize * scaleFactorLabel}px "Press Start 2P"`;
+      // Label Configuration
+      const scaleFactor = (zoom < 1.0) ? (1.0 / zoom) : 1.0;
+      const baseFontSize = 6 * GAME_CONFIG.SCALE * scaleFactor;
       ctx.textAlign = "center";
-      ctx.fillStyle = "white";
-      ctx.strokeStyle = "black";
-      ctx.lineWidth = 2 * scaleFactorLabel;
-      const labelY = y - (dh / 2) - (10 * scaleFactorLabel);
-      ctx.strokeText(name, x, labelY);
-      ctx.fillText(name, x, labelY);
+      ctx.textBaseline = "bottom";
+      ctx.font = `${baseFontSize}px "Press Start 2P"`;
       
+      // Calculate layout positions very close to character top (y - dh/2)
+      const headTop = y - (dh / 2);
+      
+      // 1. Draw Name (Topmost)
+      const nameY = headTop - (10 * scaleFactor);
+      ctx.fillStyle = "white";
+      ctx.strokeStyle = "rgba(0,0,0,0.8)";
+      ctx.lineWidth = 3 * scaleFactor;
+      ctx.strokeText(name, x, nameY);
+      ctx.fillText(name, x, nameY);
+      
+      // 2. Progress Bar (Middle)
+      const barW = 44 * scaleFactor;
+      const barH = 5 * scaleFactor;
+      const barY = headTop - (8 * scaleFactor);
+      const barX = x - barW / 2;
+      
+      // Bar Background (Dark)
+      ctx.fillStyle = "rgba(0,0,0,0.6)";
+      ctx.fillRect(barX, barY, barW, barH);
+      
+      // Bar Progress (Green)
+      ctx.fillStyle = "#4CAF50";
+      const progress = maxQuestions > 0 ? Math.min(1, correct / maxQuestions) : 0; 
+      if (progress > 0) {
+          ctx.fillRect(barX, barY, barW * progress, barH);
+      }
+      
+      // Bar Border (Crisp)
+      ctx.strokeStyle = "white";
+      ctx.lineWidth = 1 * scaleFactor;
+      ctx.strokeRect(barX, barY, barW, barH);
+
+      // 3. Stats / PTS (Just above head/integrated)
       if (score !== null) {
-          ctx.font = `bold ${8 * scaleFactorLabel}px Arial`;
-          ctx.fillText(`${score} PTS`, x, labelY - (12 * scaleFactorLabel));
+          const statsText = `${score} PTS (${correct}/${maxQuestions})`;
+          ctx.font = `${baseFontSize * 0.7}px "Press Start 2P"`;
+          const statsY = headTop - (1 * scaleFactor);
+          ctx.strokeText(statsText, x, statsY);
+          ctx.fillText(statsText, x, statsY);
       }
       
       ctx.restore();
@@ -93,6 +130,8 @@ export function drawPlayer(player, ctx, zoom = 1.0) {
         idleImage: player.idleImage,
         idleFrames: player.idleFrames || 9,
         runFrames: player.runFrames || 8,
+        correct: (window.gameInstance?.correctAnswersCount) ?? 0,
+        maxQuestions: (window.gameInstance?.maxQuestions) ?? GAME_CONFIG.MAX_QUESTIONS,
         zoom: zoom
     });
 }

@@ -6,6 +6,7 @@ export class UIManager {
    */
   constructor(game) {
     this.game = game;
+    this.isJoining = false;
 
     // HUD
     this.scoreElement   = document.getElementById('score-value');
@@ -118,6 +119,15 @@ export class UIManager {
             }
         };
     }
+
+    const toggleEnemiesBtn = document.getElementById('admin-toggle-enemies-btn');
+    if (toggleEnemiesBtn) {
+        toggleEnemiesBtn.onclick = () => {
+            this.game.showEnemies = !this.game.showEnemies;
+            toggleEnemiesBtn.textContent = this.game.showEnemies ? 'HIDE ENEMIES' : 'SHOW ENEMIES';
+            this.game.showNotification(this.game.showEnemies ? 'Musuh ditampilkan' : 'Musuh disembunyikan', 'info');
+        };
+    }
   }
 
   // ─────────────────────────────────────────────────
@@ -191,10 +201,23 @@ export class UIManager {
       
       this.lobbyModal.classList.remove('hidden');
       
-      // If we're not connected yet, try to join
-      if (code && code !== '000000' && (!this.game.multiplayer || !this.game.multiplayer.isConnected)) {
+      // Handle URL-based joining (initial load or direct link)
+      // We check isJoining to prevent the recursive double-join bug!
+      if (code && code !== '000000' && !this.isJoining && (!this.game.multiplayer || !this.game.multiplayer.isConnected)) {
+          this.isJoining = true;
           this.inputRoomCode.value = code;
-          this.mainJoinBtn.click();
+          this.game.playerName = this.inputPlayerName.value.trim() || 'PLAYER';
+          this.lobbyStatus.textContent = "Bergabung ke room " + code + "...";
+          
+          this.game.multiplayer.joinRoom(code, this.game.playerName)
+            .catch(e => {
+                console.error("[Router] Join failed:", e);
+                this.lobbyModal.classList.add('hidden');
+                this.startModal.classList.remove('hidden');
+                this.navigateTo('/');
+                alert("Room tidak ditemukan!");
+            })
+            .finally(() => { this.isJoining = false; });
       }
     }
   }
@@ -222,8 +245,10 @@ export class UIManager {
       this.navigateTo('/host/settings');
     };
 
-    // MAIN: Join Room -> Langsung Join dengan kode
+    // MAIN: Join Room -> Navigasi ke URL lobby, join ditangani oleh Router/navigateTo
     this.mainJoinBtn.onclick = async () => {
+      if (this.isJoining) return;
+      
       const code = this.inputRoomCode.value.trim().toUpperCase();
       if (!code) {
         alert("Masukkan Kode Room terlebih dahulu!");
@@ -231,21 +256,8 @@ export class UIManager {
       }
       this.game.playerName = this.inputPlayerName.value.trim() || 'PLAYER';
       
-      // Navigate to lobby URL pattern
+      // Navigate to lobby URL pattern - this will trigger joinRoom inside navigateTo
       this.navigateTo(`/host/${code}/lobby`);
-      
-      this.lobbyStatus.textContent = "Bergabung ke room " + code + "...";
-      
-      try {
-        if (this.game.multiplayer) {
-           await this.game.multiplayer.joinRoom(code, this.game.playerName);
-        }
-      } catch (e) {
-        console.error(e);
-        this.lobbyModal.classList.add('hidden');
-        this.startModal.classList.remove('hidden');
-        alert("Room tidak ditemukan!");
-      }
     };
 
     // SETTINGS: Batal -> Kembali ke Quiz Selection

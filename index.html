@@ -28,23 +28,25 @@
       <!-- HOST ADMIN HUD -->
       <div id="host-hud" class="hidden">
          <div class="host-header">
-            <div style="display:flex; align-items:center; gap:20px;">
-               <div class="host-logo">ZIGMA</div>
-               <div class="host-live-badge">● LIVE</div>
-            </div>
+            <div class="host-logo">ZIGMA</div>
             <div class="host-big-timer" id="host-timer-value">00:00</div>
-            <div class="host-decor-top">SPECTATOR MODE</div>
+            <div class="host-right-header">
+               <div class="host-secondary-logo">GAME FOR SMART</div>
+            </div>
          </div>
-        <div class="host-bottom-actions">
-           <button class="btn-akhiri-game" id="admin-end-game-btn">AKHIRI GAME</button>
-        </div>
+         
+         <div class="host-bottom-row">
+            <div class="host-bottom-actions">
+               <button class="btn-akhiri-game" id="admin-end-game-btn">AKHIRI GAME</button>
+            </div>
+         </div>
 
-        <div class="host-sidebar">
+         <!-- Sidebar hidden by default or moved out of map area -->
+         <div class="host-sidebar hidden">
             <div class="sidebar-title">PLAYERS (<span id="host-mon-count">0</span>)</div>
             <div id="host-players-monitoring" class="monitoring-list">
-                <!-- Live player stats injected here -->
             </div>
-        </div>
+         </div>
       </div>
     </div>
 

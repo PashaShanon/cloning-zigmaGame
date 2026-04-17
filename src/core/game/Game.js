@@ -9,6 +9,7 @@ import { MobileController } from './MobileController.js';
 
 export class Game {
   constructor() {
+    window.gameInstance = this;
     this.canvas = document.getElementById('game-canvas');
     this.ctx = this.canvas.getContext('2d');
     this.map = new Map();
@@ -43,6 +44,7 @@ export class Game {
     
     // Camera state
     this.isAdminMode = false;
+    this.showEnemies = true;
     this.gameLoopId = null;
     
     this.init();
@@ -111,12 +113,13 @@ export class Game {
       const mapW = (this.map.width * this.map.tileSize * this.map.scale);
       const mapH = (this.map.height * this.map.tileSize * this.map.scale);
       
-      const padding = 100;
+      const padding = 40; // Reduced padding to fill screen more
       const zoomX = this.canvas.width / (mapW + padding);
       const zoomY = this.canvas.height / (mapH + padding);
       
-      this.cameraZoom = Math.min(zoomX, zoomY, 0.45);
-      if (this.cameraZoom < 0.1) this.cameraZoom = 0.1;
+      // Allow map to fill the screen, no arbitrary 0.45 cap
+      this.cameraZoom = Math.min(zoomX, zoomY);
+      if (this.cameraZoom < 0.05) this.cameraZoom = 0.05; // Absolute minimum
       
       this.cameraX = (mapW - this.canvas.width / this.cameraZoom) / 2;
       this.cameraY = (mapH - this.canvas.height / this.cameraZoom) / 2;
@@ -405,9 +408,12 @@ export class Game {
     
     if (this.map.ready) this.map.draw(this.ctx);
 
-    if (this.nearbyEnemy) this.nearbyEnemy.isNearby = true;
-    this.enemies.forEach(e => e.draw(this.ctx, this.cameraZoom));
-    if (this.nearbyEnemy) this.nearbyEnemy.isNearby = false;
+    // Hide enemies entirely for Admin/Host as requested
+    if (!this.isAdminMode && this.showEnemies) {
+      if (this.nearbyEnemy) this.nearbyEnemy.isNearby = true;
+      this.enemies.forEach(e => e.draw(this.ctx, this.cameraZoom));
+      if (this.nearbyEnemy) this.nearbyEnemy.isNearby = false;
+    }
     
     if (this.multiplayer.remotePlayers) {
       this.multiplayer.remotePlayers.forEach((p, id) => {
@@ -415,7 +421,7 @@ export class Game {
       });
     }
     
-    if (this.player) this.player.draw(this.ctx, this.cameraZoom);
+    if (this.player && !this.isAdminMode) this.player.draw(this.ctx, this.cameraZoom);
     
     this.ctx.restore();
     if (GAME_CONFIG.DEBUG_MODE) this.drawDebugInfo();
