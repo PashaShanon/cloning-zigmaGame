@@ -15,7 +15,7 @@ export function drawCharacterSprite(ctx, x, y, config = {}) {
         idleFrames = 9,
         runFrames = 8,
         score = null,
-        correct = 0,
+        answered = 0,
         maxQuestions = 5,
         zoom = 1.0
     } = config;
@@ -69,11 +69,11 @@ export function drawCharacterSprite(ctx, x, y, config = {}) {
       ctx.textBaseline = "bottom";
       ctx.font = `${baseFontSize}px "Press Start 2P"`;
       
-      // Calculate layout positions very close to character top (y - dh/2)
-      const headTop = y - (dh / 2);
+      // Calculate layout positions from character top (y - dh/2)
+      const topOffset = y - (dh / 2) - (8 * scaleFactor);
       
       // 1. Draw Name (Topmost)
-      const nameY = headTop - (10 * scaleFactor);
+      const nameY = topOffset - (14 * scaleFactor);
       ctx.fillStyle = "white";
       ctx.strokeStyle = "rgba(0,0,0,0.8)";
       ctx.lineWidth = 3 * scaleFactor;
@@ -83,7 +83,7 @@ export function drawCharacterSprite(ctx, x, y, config = {}) {
       // 2. Progress Bar (Middle)
       const barW = 44 * scaleFactor;
       const barH = 5 * scaleFactor;
-      const barY = headTop - (8 * scaleFactor);
+      const barY = topOffset - (10 * scaleFactor);
       const barX = x - barW / 2;
       
       // Bar Background (Dark)
@@ -92,7 +92,7 @@ export function drawCharacterSprite(ctx, x, y, config = {}) {
       
       // Bar Progress (Green)
       ctx.fillStyle = "#4CAF50";
-      const progress = maxQuestions > 0 ? Math.min(1, correct / maxQuestions) : 0; 
+      const progress = maxQuestions > 0 ? Math.min(1, answered / maxQuestions) : 0; 
       if (progress > 0) {
           ctx.fillRect(barX, barY, barW * progress, barH);
       }
@@ -102,11 +102,11 @@ export function drawCharacterSprite(ctx, x, y, config = {}) {
       ctx.lineWidth = 1 * scaleFactor;
       ctx.strokeRect(barX, barY, barW, barH);
 
-      // 3. Stats / PTS (Just above head/integrated)
+      // 3. Stats / PTS (Bottom of Cluster)
       if (score !== null) {
-          const statsText = `${score} PTS (${correct}/${maxQuestions})`;
-          ctx.font = `${baseFontSize * 0.7}px "Press Start 2P"`;
-          const statsY = headTop - (1 * scaleFactor);
+          const statsText = `${score} PTS (${answered}/${maxQuestions})`;
+          ctx.font = `${baseFontSize * 0.7}px "Press Start 2P"`; // Smaller font for stats
+          const statsY = topOffset + (2 * scaleFactor);
           ctx.strokeText(statsText, x, statsY);
           ctx.fillText(statsText, x, statsY);
       }
@@ -130,8 +130,8 @@ export function drawPlayer(player, ctx, zoom = 1.0) {
         idleImage: player.idleImage,
         idleFrames: player.idleFrames || 9,
         runFrames: player.runFrames || 8,
-        correct: (window.gameInstance?.correctAnswersCount) ?? 0,
-        maxQuestions: (window.gameInstance?.maxQuestions) ?? GAME_CONFIG.MAX_QUESTIONS,
+        answered: player.answeredQuestionsCount || 0,
+        maxQuestions: player.maxQuestions || GAME_CONFIG.MAX_QUESTIONS,
         zoom: zoom
     });
 }

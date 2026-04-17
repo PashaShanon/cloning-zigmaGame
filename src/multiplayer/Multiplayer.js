@@ -344,7 +344,6 @@ export class MultiplayerManager {
                 existing.isMoving  = (typeof p.isMoving === 'boolean') ? p.isMoving : existing.isMoving;
                 existing.facingLeft = (typeof p.facingLeft === 'boolean') ? p.facingLeft : existing.facingLeft;
                 existing.score     = (typeof p.score === 'number') ? p.score : existing.score;
-                existing.correct   = (typeof p.correctAnswers === 'number') ? p.correctAnswers : existing.correct;
                 existing.answered  = (typeof p.answeredCount === 'number') ? p.answeredCount : existing.answered;
                 existing.name      = playerName;
             } else {
@@ -359,7 +358,6 @@ export class MultiplayerManager {
                     isMoving:  p.isMoving  ?? false,
                     facingLeft: p.facingLeft ?? false,
                     score:     p.score     ?? 0,
-                    correct:   p.correctAnswers ?? 0,
                     answered:  p.answeredCount ?? 0,
                     animFrame: 0,
                     animTick: 0
@@ -464,7 +462,6 @@ export class MultiplayerManager {
             runImage: tex.run,
             idleImage: tex.idle,
             score: p.score,
-            correct: p.correct || 0,
             answered: p.answered || 0,
             maxQuestions: this.game.maxQuestions || 5,
             zoom: this.game.cameraZoom

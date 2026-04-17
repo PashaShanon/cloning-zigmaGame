@@ -101,10 +101,10 @@ export class Enemy {
 
     // Consolidated Animation Loop (Handles both single and multiplayer)
     this.tick++;
-    let animSpeed = 8;
-    if (this.state === 'FLEE') animSpeed = 4;
+    let animSpeed = 5; // Faster default
+    if (this.state === 'FLEE') animSpeed = 3; // Even faster when fleeing
     else if (this.state === 'NOTICE') animSpeed = 999; // Pause on notice
-    else if (!this.isMoving) animSpeed = 12;
+    else if (!this.isMoving) animSpeed = 8; // Faster idle
 
     if (this.tick > animSpeed) {
         this.animFrame = (this.animFrame + 1) % frames;

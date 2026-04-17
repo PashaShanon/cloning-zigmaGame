@@ -9,7 +9,6 @@ import { MobileController } from './MobileController.js';
 
 export class Game {
   constructor() {
-    window.gameInstance = this;
     this.canvas = document.getElementById('game-canvas');
     this.ctx = this.canvas.getContext('2d');
     this.map = new Map();
