@@ -61,6 +61,8 @@ export class UIManager {
     this.infoQuestions  = document.getElementById('info-questions');
     this.infoTime       = document.getElementById('info-time');
     this.playerCount    = document.getElementById('player-count');
+    this.lobbyQrCode    = document.getElementById('lobby-qr-code');
+    this.lobbyInviteLink = document.getElementById('lobby-invite-link');
 
     // Admin HUD
     this.hostHud        = document.getElementById('host-hud');
@@ -107,6 +109,11 @@ export class UIManager {
       const container = document.getElementById('game-container');
       container.classList.add('anim-iris-out');
       
+      // Explicitly disconnect from multiplayer when going back to menu
+      if (this.game.multiplayer) {
+          this.game.multiplayer.disconnect();
+      }
+
       setTimeout(() => {
          this.navigateTo('/');
       }, 1200);
@@ -150,9 +157,12 @@ export class UIManager {
   }
 
   navigateTo(path, push = true) {
-    // Normalize path: treat /index.html as /
+    // Normalize path: treat /index.html as / and remove trailing slashes
     if (path.endsWith('/index.html')) {
         path = path.replace('/index.html', '/');
+    }
+    if (path !== '/' && path.endsWith('/')) {
+        path = path.slice(0, -1);
     }
 
     console.log("[Router] Navigating to:", path);
@@ -166,10 +176,19 @@ export class UIManager {
     this.settingsModal.classList.add('hidden');
     this.lobbyModal.classList.add('hidden');
     this.gameOverModal.classList.add('hidden');
+    if (this.mobileControls) this.mobileControls.classList.add('hidden');
     if (this.zigmaHeader) this.zigmaHeader.classList.remove('hidden');
 
+    // Auto-disconnect ONLY if leaving ALL game-related paths for a truly unrelated page (like home or settings)
+    const isLobbyOrGame = path.includes('/lobby') || path.includes('/game') || path.includes('/progress') || path.includes('/host/select-quiz') || path.includes('/host/settings');
+    
+    if (!isLobbyOrGame && this.game.multiplayer && this.game.multiplayer.isConnected) {
+        console.log("[Router] Leaving game context entirely, disconnecting multiplayer...");
+        this.game.multiplayer.disconnect();
+    }
+
     // Show based on path
-    if (path === '/' || path.includes('/home')) {
+    if (path === '/' || path.includes('/home') || path === '/host') {
       this.startModal.classList.remove('hidden');
     } 
     else if (path.includes('/host/select-quiz')) {
@@ -177,21 +196,86 @@ export class UIManager {
     }
     else if (path.includes('/host/settings')) {
       this.settingsModal.classList.remove('hidden');
+      if (this.settingsCreateBtn) this.settingsCreateBtn.disabled = false;
     }
-    else if (path.includes('/host/progress')) {
+    else if (path.includes('/progress')) {
+      const parts = path.split('/');
+      const codeIndex = parts.indexOf('host') + 1;
+      const code = parts[codeIndex];
+      
       this.game.isAdminMode = true;
       if (this.hostHud) this.hostHud.classList.remove('hidden');
       this.uiLayer.classList.add('hidden'); // Hide normal HUD
       if (this.zigmaHeader) this.zigmaHeader.classList.add('hidden');
       if (this.mobileControls) this.mobileControls.classList.add('hidden');
+
+      // Reload handling: Join room if not connected
+      const mp = this.game.multiplayer;
+      const isAlreadyInTargetRoom = mp?.isConnected && (mp?.room?.state?.roomCode === code || mp?.roomCode === code);
+      
+      if (code && code !== '000000' && !this.isJoining && !isAlreadyInTargetRoom) {
+          console.log("[Router] Reconnecting to room in progress view:", code);
+          this.isJoining = true;
+          this.game.multiplayer.joinRoom(code, 'ADMIN')
+            .catch(e => {
+                console.error("[Router] Progress reconnect failed:", e);
+                this.navigateTo('/');
+            })
+            .finally(() => { this.isJoining = false; });
+      }
     }
-    else if (path === '/game' || path.includes('/game')) {
+    else if (path.includes('/game')) {
+      const parts = path.split('/');
+      const codeIndex = parts.indexOf('game') + 1;
+      const code = parts[codeIndex];
+
       this.game.isAdminMode = false;
       this.uiLayer.classList.remove('hidden');
       if (this.hostHud) this.hostHud.classList.add('hidden');
       if (this.zigmaHeader) this.zigmaHeader.classList.add('hidden');
-      // Mobile controls visibility is handled by Game.js / MobileController.js usually, 
-      // but let's ensure it's shown if on mobile
+      
+      // Mobile controls visibility
+      if (this.game && this.game.mobileController) {
+          this.game.mobileController.show();
+      }
+
+      // Reload handling for players
+      const mp = this.game.multiplayer;
+      const isAlreadyInTargetRoom = mp?.isConnected && (mp?.room?.state?.roomCode === code || mp?.roomCode === code);
+
+      if (code && code !== '000000' && !this.isJoining && !isAlreadyInTargetRoom && !mp?.isReconnecting) {
+          console.log("[Router] Attempting to restore game session for room:", code);
+          this.isJoining = true;
+          
+          // Try session reconnection ONLY if not currently in a room
+          const reconnectPromise = (!mp?.room) 
+            ? this.game.multiplayer.tryReconnect() 
+            : Promise.resolve(mp.room);
+            
+          reconnectPromise.then(room => {
+              if (room) {
+                  console.log("[Router] Session restored via reconnect");
+                  
+                  // Start game engine if it's the game or progress view
+                  if (isGame || isProgress) {
+                      this.game.startMultiplayer(room, room.state.hostId === room.sessionId);
+                  }
+                  return; 
+              }
+              
+              // If reconnect failed, perform normal join
+              const savedName = localStorage.getItem('playerName') || 'PLAYER';
+              return this.game.multiplayer.joinRoom(code, savedName);
+          })
+          .catch(e => {
+              console.error("[Router] Player recovery failed:", e);
+              // Only redirect if absolutely lost connection and not in middle of a reconnect attempt
+              if (!this.game.multiplayer?.isReconnecting) {
+                  this.navigateTo('/');
+              }
+          })
+          .finally(() => { this.isJoining = false; });
+      }
     }
     else if (path.includes('/lobby')) {
       // Path format: /host/ABCDEF/lobby
@@ -203,21 +287,47 @@ export class UIManager {
       
       // Handle URL-based joining (initial load or direct link)
       // We check isJoining to prevent the recursive double-join bug!
-      if (code && code !== '000000' && !this.isJoining && (!this.game.multiplayer || !this.game.multiplayer.isConnected)) {
+      const mp = this.game.multiplayer;
+      const currentRoomCode = mp?.room?.state?.roomCode || mp?.roomCode;
+      
+      // Strict check: already connected to THIS room?
+      const isAlreadyInTargetRoom = mp?.isConnected && currentRoomCode === code && mp?.room;
+
+      console.log(`[Router] Lobby check - Code: ${code}, isJoining: ${this.isJoining}, AlreadyInRoom: ${isAlreadyInTargetRoom}, Reconnecting: ${mp?.isReconnecting}`);
+
+      if (code && code !== '000000' && !this.isJoining && !isAlreadyInTargetRoom && !mp?.isReconnecting) {
+          console.log(`[Router] Triggering join/reconnect for code: ${code}`);
           this.isJoining = true;
-          this.inputRoomCode.value = code;
-          this.game.playerName = this.inputPlayerName.value.trim() || 'PLAYER';
-          this.lobbyStatus.textContent = "Bergabung ke room " + code + "...";
           
-          this.game.multiplayer.joinRoom(code, this.game.playerName)
-            .catch(e => {
-                console.error("[Router] Join failed:", e);
-                this.lobbyModal.classList.add('hidden');
-                this.startModal.classList.remove('hidden');
-                this.navigateTo('/');
-                alert("Room tidak ditemukan!");
-            })
-            .finally(() => { this.isJoining = false; });
+          // Only try reconnect if NOT already in a room
+          const reconnectPromise = (!mp?.room)
+            ? this.game.multiplayer.tryReconnect()
+            : Promise.resolve(mp.room);
+
+          reconnectPromise.then(room => {
+              if (room) {
+                  console.log("[Router] Session restored via reconnect in lobby");
+                  return;
+              }
+              
+              this.inputRoomCode.value = code;
+              this.game.playerName = this.inputPlayerName.value.trim() || 'PLAYER';
+              this.lobbyStatus.textContent = "Bergabung ke room " + code + "...";
+              return this.game.multiplayer.joinRoom(code, this.game.playerName);
+          })
+          .then(() => {
+              console.log("[Router] Join/Reconnect successful for", code);
+          })
+          .catch(e => {
+              console.error("[Router] Join failed:", e);
+              if (!this.game.multiplayer?.isConnected) {
+                  this.lobbyModal.classList.add('hidden');
+                  this.startModal.classList.remove('hidden');
+                  this.navigateTo('/');
+                  alert("Room tidak ditemukan!");
+              }
+          })
+          .finally(() => { this.isJoining = false; });
       }
     }
   }
@@ -226,6 +336,15 @@ export class UIManager {
   // START SCREEN
   // ─────────────────────────────────────────────────
   showStartScreen(onStart) {
+    const path = window.location.pathname;
+    const isGameContext = path.includes('/game') || path.includes('/lobby') || path.includes('/progress');
+    
+    if (isGameContext) {
+        console.log("[UI] Refresh detected at game path. Maintaining context, skipping start screen.");
+        this.startActionCallback = onStart; // Still store callback just in case
+        return;
+    }
+
     this.uiLayer.classList.add('hidden');
     this.startActionCallback = onStart;
     
@@ -238,6 +357,35 @@ export class UIManager {
     this.quizCancelBtn.onclick = () => {
       this.navigateTo('/');
     };
+
+    // QUIZ SELECT: Search & Filter Dropdown
+    const searchInput = document.getElementById('quiz-search-input');
+    const categorySelect = document.getElementById('quiz-category-select');
+    const quizCards = document.querySelectorAll('.quiz-item-card');
+
+    const filterQuizzes = () => {
+      const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+      const categoryFilter = categorySelect ? categorySelect.value.toUpperCase() : 'ALL';
+      
+      quizCards.forEach(card => {
+        const titleEl = card.querySelector('.quiz-item-title');
+        const tagEl = card.querySelector('.quiz-cat-tag');
+        if (!titleEl || !tagEl) return;
+
+        const titleMatch = titleEl.textContent.toLowerCase().includes(searchTerm);
+        const cardCategory = tagEl.textContent.trim().toUpperCase();
+        const categoryMatch = categoryFilter === 'ALL' || cardCategory === categoryFilter;
+        
+        if (titleMatch && categoryMatch) {
+          card.style.display = 'block';
+        } else {
+          card.style.display = 'none';
+        }
+      });
+    };
+
+    if (searchInput) searchInput.addEventListener('input', filterQuizzes);
+    if (categorySelect) categorySelect.addEventListener('change', filterQuizzes);
 
     // Global selector for quiz cards (since they use onclick in HTML)
     window.selectQuiz = (category, title) => {
@@ -267,6 +415,9 @@ export class UIManager {
 
     // SETTINGS: Create -> Buat Room di Server
     this.settingsCreateBtn.onclick = () => {
+      if (this.settingsCreateBtn.disabled) return;
+      this.settingsCreateBtn.disabled = true;
+
       const playerName = this.inputPlayerName.value.trim() || 'PLAYER';
       const questions  = parseInt(this.inputQuestions.value);
       const timeInSec  = parseInt(this.inputTime.value) * 60;
@@ -317,30 +468,77 @@ export class UIManager {
   }
 
   onRoomJoined(roomCode, isHost, data = {}) {
-    console.log("[UI] Room Joined:", roomCode, "isHost:", isHost, "Data:", data);
+    const urlCode = window.location.pathname.split('/')[2];
+    const finalCode = (roomCode && roomCode !== "000000") ? roomCode : (urlCode || "ERROR");
+    const gameStarted = data.gameStarted || false;
     
-    // Update the URL to the full lobby path
-    this.navigateTo(`/host/${roomCode}/lobby`, true);
+    console.log(`[UI] Room Joined -> Code: ${finalCode}, isHost: ${isHost}, GameStarted: ${gameStarted}`);
 
-    if (this.infoRoomCode) this.infoRoomCode.textContent = roomCode;
+    // 1. Navigation & View Determination
+    const lobbyPath = `/host/${finalCode}/lobby`;
+    const hostGamePath = `/host/${finalCode}/progress`;
+    const playerGamePath = `/game/${finalCode}`;
     
-    // settings display
+    const isAlreadyAtLobby = window.location.pathname === lobbyPath;
+    const isAlreadyAtGame  = window.location.pathname === hostGamePath || window.location.pathname === playerGamePath;
+
+    // Decide where to navigate - Always ensure we are at the right path
+    if (gameStarted && !isAlreadyAtGame) {
+        const targetPath = isHost ? hostGamePath : playerGamePath;
+        this.navigateTo(targetPath, true);
+    } else if (!gameStarted && !isAlreadyAtLobby) {
+        this.navigateTo(lobbyPath, true);
+    }
+
+    // 2. UI Visibility based on Game State
+    if (gameStarted) {
+        // HIDDEN LOBBY, SHOW GAME HUD
+        this.hideLobby();
+        if (isHost) {
+            this.hostHud.classList.remove('hidden');
+            this.adminEndGameBtn.classList.remove('hidden');
+        }
+        
+        // Ensure game initialization logic runs if needed
+        if (this.game && typeof this.game.startMultiplayer === 'function' && !this.game.isRunning) {
+            console.log("[UI] Game already started on server, restoring game view...");
+            this.onHostChanged(isHost); // Ensure camera/ui knows our role
+            this.game.startMultiplayer();
+            this.game.gameLoop(); // CRITICAL: Start the rendering loop
+        }
+    } else {
+        // SHOW LOBBY
+        this.lobbyModal.classList.remove('hidden');
+        if (isHost) {
+            this.hostHud.classList.add('hidden');
+        }
+    }
+
+    // 3. Update Text Content
+    if (this.infoRoomCode) this.infoRoomCode.textContent = finalCode;
+    
+    const currentUrl = window.location.origin + lobbyPath;
+    if (this.lobbyQrCode) this.lobbyQrCode.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(currentUrl)}`;
+    if (this.lobbyInviteLink) this.lobbyInviteLink.textContent = currentUrl;
+
+    if (isHost) {
+        this.lobbyStatus.innerHTML = gameStarted ? '<span style="color:#4CAF50">GAME BERLANJUT...</span>' : '<span style="color:#FFD700">👑 KAMU ADALAH HOST</span>';
+    } else {
+        this.lobbyStatus.textContent = gameStarted ? "KEMBALI KE PERMAINAN" : "BERHASIL BERGABUNG";
+        this.lobbyStatus.style.color = "#4CAF50";
+    }
+    
+    // 4. Metadata
     if (this.infoMap) this.infoMap.textContent = data.mapName || 'map.tmx';
     if (this.infoQuestions) this.infoQuestions.textContent = data.maxQuestions || '5';
     if (this.infoTime) this.infoTime.textContent = (data.timeLimit || '5') + " Menit";
-
-    const qrEl = document.getElementById('lobby-qr-code');
-    if (qrEl) {
-      const currentUrl = window.location.origin + `/host/${roomCode}/lobby`;
-      qrEl.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(currentUrl)}`;
-    }
 
     this.onHostChanged(isHost);
 
     const copyBtn = document.getElementById('copy-code-btn');
     if (copyBtn) {
       copyBtn.onclick = () => {
-        navigator.clipboard.writeText(roomCode);
+        navigator.clipboard.writeText(finalCode);
         this.showNotification('Kode room disalin!', 'success');
       };
     }
@@ -357,33 +555,39 @@ export class UIManager {
         else emptyMsg.classList.remove('hidden');
     }
 
-    players.forEach(p => {
+    // ── OPTIMIZATION: Check if HTML actually changed to avoid DOM thrashing ──
+    const newListHTML = players.map(p => {
       const isMe = p.id === mySessionId;
       const isHost = p.id === hostId;
-      
-      const li = document.createElement('li');
-      li.className = `lobby-player-item ${isMe ? 'is-me' : ''} ${isHost ? 'is-host' : ''}`;
-      
-      // Adapted to Zigma style list items
-      li.style.background = isMe ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.1)';
-      li.style.padding = '15px';
-      li.style.borderRadius = '12px';
-      li.style.display = 'flex';
-      li.style.justifyContent = 'space-between';
-      li.style.alignItems = 'center';
-      li.style.color = '#fff';
-      li.style.fontSize = '0.7rem';
+      const isOffline = p.isConnected === false;
 
-      li.innerHTML = `
-        <div style="display: flex; align-items: center; gap: 10px;">
-            <div class="user-avatar" style="width:24px; height:24px; background: ${isHost ? '#FFD700' : '#4CAF50'}"></div>
-            <span>${p.name}${isMe ? ' (You)' : ''}</span>
-            ${isHost ? '<span style="font-size: 8px; color: #FFD700;">[HOST]</span>' : ''}
-        </div>
-        <span class="lobby-player-ready" style="font-size: 1rem;">${p.isReady ? '✅' : '⏳'}</span>
+      return `
+        <li class="lobby-player-item ${isMe ? 'is-me' : ''} ${isHost ? 'is-host' : ''} ${isOffline ? 'is-offline' : ''}" 
+            style="background: ${isMe ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.1)'}; 
+                   padding: 15px; border-radius: 12px; display: flex; justify-content: space-between; 
+                   align-items: center; color: #fff; font-size: 0.7rem; 
+                   opacity: ${isOffline ? '0.5' : '1'}">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <div class="user-avatar" style="width:24px; height:24px; background: ${isHost ? '#FFD700' : '#4CAF50'}"></div>
+                <div style="display: flex; flex-direction: column;">
+                    <span>${p.name}${isMe ? ' (You)' : ''}</span>
+                    ${isOffline ? '<span style="font-size: 8px; color: #ffab00;">SEDANG REFRESH...</span>' : ''}
+                </div>
+                ${isHost ? '<span style="font-size: 8px; color: #FFD700;">[HOST]</span>' : ''}
+            </div>
+            <span class="lobby-player-ready" style="font-size: 0.8rem;">
+                ${isOffline ? 
+                  '<i data-lucide="loader-2" class="animate-spin" style="color:#ffab00; width:18px; height:18px;"></i>' : 
+                  (p.isReady ? '<i data-lucide="check-circle-2" style="color:#4CAF50; width:18px; height:18px;"></i>' : '<i data-lucide="hourglass" style="color:rgba(255,255,255,0.4); width:18px; height:18px;"></i>')
+                }
+            </span>
+        </li>
       `;
-      this.lobbyPlayersList.appendChild(li);
-    });
+    }).join('');
+
+    // Always refresh the DOM to ensure accuracy
+    this.lobbyPlayersList.innerHTML = newListHTML;
+    if (window.lucide) window.lucide.createIcons();
 
     // Auto-enable start button if at least 1 player is inside
     if (hostId === mySessionId) {
@@ -458,7 +662,9 @@ export class UIManager {
     // CLIENT: Leave button
     if (this.lobbyLeaveBtn) {
       this.lobbyLeaveBtn.onclick = () => {
-        this.game.multiplayer?.disconnect();
+        if (this.game.multiplayer) {
+          this.game.multiplayer.disconnect(true); // Signal intentional exit
+        }
         this.navigateTo('/');
       };
     }

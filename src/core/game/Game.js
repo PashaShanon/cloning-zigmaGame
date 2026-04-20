@@ -195,16 +195,20 @@ export class Game {
         } else {
           this.player.resetPosition(spawnX, spawnY);
         }
+        this.player.maxQuestions = this.maxQuestions;
+        this.player.score = this.score;
         
         this.initEnemies();
         
         if (this.multiplayer.isConnected) {
             this.isRunning = true;
+            this.mobileController.show();
             this.gameLoop();
         } else {
             this.isRunning = false;
             this.uiManager.showPreGameCountdown(() => {
               this.isRunning = true;
+              this.mobileController.show();
               this.gameLoop();
             });
         }
@@ -232,6 +236,11 @@ export class Game {
       if (this.map.ready) {
         console.log("[Game] Multiplayer map ready, starting game execution");
         this.isRunning = true;
+        if (!this.isAdminMode) {
+            this.mobileController.show();
+        } else {
+            this.mobileController.hide();
+        }
       } else {
         setTimeout(waitForMap, 100);
       }
@@ -358,6 +367,7 @@ export class Game {
       
       if (isCorrect) {
         this.score += 10;
+        if (this.player) this.player.score = this.score;
         this.correctAnswersCount++;
         this.uiManager.updateScore(this.score);
         this.uiManager.showNotification('Benar!');

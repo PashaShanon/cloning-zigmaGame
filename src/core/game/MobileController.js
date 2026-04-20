@@ -14,7 +14,6 @@ export class MobileController {
 
     if (!joystickZone || !mobileControls) return;
 
-    mobileControls.classList.remove('hidden');
     mobileControls.setAttribute('data-initialized', 'true');
 
     // VERY ORIGINAL JOYSTICK
@@ -156,6 +155,21 @@ export class MobileController {
 
   forceShowMobileControls() {
     this.init();
+    this.show();
+  }
+
+  show() {
+    const mobileControls = document.getElementById('mobile-controls');
+    if (mobileControls && ('ontouchstart' in window || window.innerWidth < 1024)) {
+       mobileControls.classList.remove('hidden');
+    }
+  }
+
+  hide() {
+    const mobileControls = document.getElementById('mobile-controls');
+    if (mobileControls) {
+       mobileControls.classList.add('hidden');
+    }
   }
 }
 

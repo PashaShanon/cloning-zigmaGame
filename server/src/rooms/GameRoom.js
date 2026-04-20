@@ -3,6 +3,7 @@ import { Schema, MapSchema, type } from "@colyseus/schema";
 import { MapManager } from "./MapManager.js";
 import path from "path";
 import { fileURLToPath } from "url";
+import { quizBank } from "../../../src/data/questions.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,6 +24,8 @@ class EnemyState extends Schema {
         this.noticeTimer = 0;
         this.interrogatorId = "";
         this.baseFrame = 18;
+        this.targetX = x;
+        this.targetY = y;
     }
 }
 
@@ -37,6 +40,8 @@ type("string")(EnemyState.prototype, "state");
 type("number")(EnemyState.prototype, "stateTimer");
 type("string")(EnemyState.prototype, "interrogatorId");
 type("number")(EnemyState.prototype, "baseFrame");
+type("number")(EnemyState.prototype, "targetX");
+type("number")(EnemyState.prototype, "targetY");
 
 class Player extends Schema {
     constructor(name = "Anonymous") {
@@ -109,20 +114,6 @@ type("string")(GameState.prototype, "mapName");
 type({ map: Player })(GameState.prototype, "players");
 type({ map: EnemyState })(GameState.prototype, "enemies");
 
-// =============== QUESTION BANK ===============
-const questions = [
-    { question: "Berapa hasil dari 5 + 5?", options: ["8", "9", "10", "11"], correctAnswer: "10", difficulty: "EASY" },
-    { question: "Apa warna dari langit yang cerah?", options: ["Biru", "Merah", "Hijau", "Kuning"], correctAnswer: "Biru", difficulty: "EASY" },
-    { question: "Hewan apa yang dikenal sebagai Raja Hutan?", options: ["Gajah", "Singa", "Harimau", "Zebra"], correctAnswer: "Singa", difficulty: "EASY" },
-    { question: "Ibukota negara Indonesia adalah?", options: ["Jakarta", "Bandung", "Surabaya", "Medan"], correctAnswer: "Jakarta", difficulty: "NORMAL" },
-    { question: "Planet terdekat dari Matahari adalah?", options: ["Venus", "Mars", "Merkurius", "Jupiter"], correctAnswer: "Merkurius", difficulty: "NORMAL" },
-    { question: "Apa singkatan dari NKRI?", options: ["Negara Kesatuan Republik Indonesia", "Negara Kita Republik Indonesia", "Negara Kedaulatan Republik Indonesia", "Negara Kebangsaan Republik Indonesia"], correctAnswer: "Negara Kesatuan Republik Indonesia", difficulty: "NORMAL" },
-    { question: "Siapa presiden pertama Indonesia?", options: ["Soeharto", "B.J. Habibie", "Soekarno", "Abdurrahman Wahid"], correctAnswer: "Soekarno", difficulty: "NORMAL" },
-    { question: "Siapa penemu lampu pijar?", options: ["Isaac Newton", "Albert Einstein", "Thomas Alva Edison", "Nikola Tesla"], correctAnswer: "Thomas Alva Edison", difficulty: "HARD" },
-    { question: "Berapakah jumlah provinsi di Indonesia saat ini (2024)?", options: ["34", "36", "38", "40"], correctAnswer: "38", difficulty: "HARD" },
-    { question: "Unsur kimia dengan lambang 'Au' adalah?", options: ["Perak", "Emas", "Aluminium", "Tembaga"], correctAnswer: "Emas", difficulty: "HARD" }
-];
-
 // =============== GAME ROOM ===============
 export class GameRoom extends Room {
     onCreate(options) {
@@ -132,14 +123,20 @@ export class GameRoom extends Room {
         
         this.maxQuestions = options.maxQuestions || 5;
         this.mapName = options.mapName || "map.tmx";
-        this.difficulty = "NORMAL"; // Default difficulty since UI was replaced by map selection
+        this.difficulty = "NORMAL";
         this.timeLimit = options.timeLimit || 5;
+        this.quizCategory = options.category || "Mathematics";
 
+        this.maxClients = 30; // Safety limit to prevent extreme bloat
         this.state.mapName = this.mapName;
         
         // Use client-provided roomCode for better filter reliability
         this.roomCode = (options.roomCode || this.roomId.substring(0, 6)).toUpperCase();
         this.setMetadata({ roomCode: this.roomCode, mapName: this.mapName });
+        
+        // DISABLE AUTO-DISPOSE: We will manage room lifecycle manually
+        // to prevent accidental closures during reloads.
+        this.autoDispose = false;
         
         // Track answered questions per player
         this.playerAnswers = new Map();
@@ -148,7 +145,7 @@ export class GameRoom extends Room {
         
         // Load Map for server-side collisions
         this.mapManager = new MapManager(2); // Scale 2
-        const tmxPath = path.resolve(__dirname, `../../../assets/maps/${this.mapName}`);
+        const tmxPath = path.resolve(__dirname, `../../../src/assets/maps/${this.mapName}`);
         this.mapManager.loadMap(tmxPath);
 
         console.log(`[GameRoom] Room ${this.roomId} created, map=${this.mapName}, maxQ=${this.maxQuestions}`);
@@ -251,6 +248,15 @@ export class GameRoom extends Room {
             }
         });
 
+        this.onMessage("player_exit", (client) => {
+            const player = this.state.players.get(client.sessionId);
+            if (player) {
+                console.log(`[GameRoom] Player ${player.name} requested permanent exit.`);
+                this.state.players.delete(client.sessionId);
+                this.pendingClientAnswers.delete(client.sessionId);
+            }
+        });
+
         this.onMessage("host_end_game", (client) => {
             if (client.sessionId === this.state.hostId) {
                 console.log(`[GameRoom] Host forced game end`);
@@ -332,6 +338,7 @@ export class GameRoom extends Room {
                 roomCode: this.roomCode,
                 isHost: isHost,
                 isAdmin: client.sessionId === this.state.adminId,
+                gameStarted: this.state.gameStarted,
                 maxQuestions: this.maxQuestions,
                 difficulty: this.difficulty,
                 timeLimit: this.timeLimit || 5 
@@ -428,6 +435,43 @@ export class GameRoom extends Room {
         console.log(`[GameRoom] Initialized ${count} enemies with ${40}px wall-clearance check.`);
     }
 
+    findFurthestPointForEnemy(enemy) {
+        if (!this.mapManager || !this.state.players) return { x: enemy.x, y: enemy.y };
+
+        const area = this.mapManager.gameArea || { x: 0, y: 0, width: this.mapManager.width * this.mapManager.tileWidth * 2, height: this.mapManager.height * this.mapManager.tileHeight * 2 };
+        
+        let bestTarget = { x: enemy.x, y: enemy.y };
+        let maxMinDist = -1;
+
+        // Sample points across the map grid
+        const samplesX = 8;
+        const samplesY = 8;
+        const players = Array.from(this.state.players.values());
+
+        for (let ix = 0; ix < samplesX; ix++) {
+            for (let iy = 0; iy < samplesY; iy++) {
+                const tx = area.x + (ix / (samplesX - 1)) * area.width;
+                const ty = area.y + (iy / (samplesY - 1)) * area.height;
+
+                // Skip if solid
+                if (this.mapManager.isSolid(tx, ty, 15)) continue;
+
+                // Calculate distance to nearest player
+                let minPlayerDist = Infinity;
+                players.forEach(p => {
+                    const d = Math.sqrt(Math.pow(tx - p.x, 2) + Math.pow(ty - p.y, 2));
+                    if (d < minPlayerDist) minPlayerDist = d;
+                });
+
+                if (minPlayerDist > maxMinDist) {
+                    maxMinDist = minPlayerDist;
+                    bestTarget = { x: tx, y: ty };
+                }
+            }
+        }
+        return bestTarget;
+    }
+
     updatePlayers() {
         if (!this.state.gameStarted) return;
 
@@ -519,19 +563,36 @@ export class GameRoom extends Room {
                     if (enemy.stateTimer <= 0) {
                         enemy.state = "FLEE";
                         enemy.stateTimer = 240; // Flee for 4 seconds
+                        // Pick a destination furthest from players
+                        const dest = this.findFurthestPointForEnemy(enemy);
+                        enemy.targetX = dest.x;
+                        enemy.targetY = dest.y;
                     }
                     break;
 
                 case "FLEE":
-                    if (nearestPlayer) {
-                        const dx = enemy.x - nearestPlayer.x;
-                        const dy = enemy.y - nearestPlayer.y;
-                        const dist = Math.sqrt(dx*dx + dy*dy);
-                        if (dist > 0) {
-                            enemy.vx = (dx / dist) * 2.2;
-                            enemy.vy = (dy / dist) * 2.2;
-                        }
+                    // Move towards targetX, targetY
+                    const dx = enemy.targetX - enemy.x;
+                    const dy = enemy.targetY - enemy.y;
+                    const distToTarget = Math.sqrt(dx*dx + dy*dy);
+                    
+                    if (distToTarget > 10) {
+                        enemy.vx = (dx / distToTarget) * FLEE_SPEED;
+                        enemy.vy = (dy / distToTarget) * FLEE_SPEED;
+                    } else {
+                        enemy.vx = 0;
+                        enemy.vy = 0;
+                        enemy.state = "TIRED";
+                        enemy.stateTimer = 120;
                     }
+
+                    // Re-calculate target periodically if player gets too close to the path
+                    if (nearestPlayer && minDist < 100) {
+                        const dest = this.findFurthestPointForEnemy(enemy);
+                        enemy.targetX = dest.x;
+                        enemy.targetY = dest.y;
+                    }
+
                     enemy.stateTimer--;
                     if (enemy.stateTimer <= 0) enemy.state = "TIRED";
                     break;
@@ -623,8 +684,11 @@ export class GameRoom extends Room {
     }
     
     async sendQuestionToPlayer(client) {
-        // Get question based on difficulty
-        const availableQuestions = questions.filter(q => q.difficulty === this.difficulty);
+        // Get question based on category and difficulty
+        const categoryQuestions = quizBank[this.quizCategory] || quizBank["Mathematics"];
+        let availableQuestions = categoryQuestions.filter(q => q.difficulty === this.difficulty);
+        if (availableQuestions.length === 0) availableQuestions = categoryQuestions; // Fallback
+        
         const unusedQuestions = availableQuestions.filter(q => !this.usedQuestions.includes(q.question));
         
         let question;
@@ -745,6 +809,16 @@ export class GameRoom extends Room {
             player.x = sx;
             player.y = sy;
 
+            // Check for duplicate player names and clean up stale sessions if needed
+            // This prevents "ghost" players from sticking around if reconnect fails or join is used instead
+            this.state.players.forEach((p, sessionId) => {
+                if (p.name === playerName && sessionId !== client.sessionId) {
+                    console.log(`[GameRoom] Removing stale session for same player name: ${playerName}`);
+                    this.state.players.delete(sessionId);
+                }
+            });
+
+            player.isConnected = true; 
             this.state.players.set(client.sessionId, player);
             
             // Broadcast updated player list
@@ -754,17 +828,66 @@ export class GameRoom extends Room {
         }
     }
     
-    onLeave(client, consented) {
-        console.log(`[GameRoom] Player ${client.sessionId} left`);
-        this.state.players.delete(client.sessionId);
+    async onLeave(client, consented) {
+        const player = this.state.players.get(client.sessionId);
+        const name = player ? player.name : "SPECTATOR/HOST";
+        const isHost = (client.sessionId === this.state.hostId);
         
-        // If host leaves, designate new host if possible
-        if (client.sessionId === this.state.hostId) {
-            this.state.hostId = Array.from(this.state.players.keys())[0] || "";
-            console.log(`[GameRoom] Host changed to: ${this.state.hostId}`);
+        // IMPROVED DETECTION:
+        // Colyseus sends true, "true", or 1000/4000/etc depending on how it's called.
+        const isConsentedExit = (consented === true || consented === "true" || consented === 1000 || consented === 1002);
+        const isUnconsented = !isConsentedExit;
+
+        console.log(`[GameRoom] ${name} (ID: ${client.sessionId}) left. Received Consented Param: ${consented} (Type: ${typeof consented}) -> isUnconsented: ${isUnconsented}`);
+        
+        if (isUnconsented) {
+            console.log(`[GameRoom] ${name} dropped unexpectedly. Waiting 5 minutes for reconnection...`);
+            try {
+                const player = this.state.players.get(client.sessionId);
+                if (player) player.isConnected = false; // Mark as disconnected in state
+                
+                await this.allowReconnection(client, 300);
+                
+                if (player) player.isConnected = true; // Back online!
+                console.log(`[GameRoom] ${name} (ID: ${client.sessionId}) successfully reconnected.`);
+                
+                // CRITICAL: Send current room data to the reconnected client so their UI updates!
+                client.send("joined", {
+                    sessionId: client.sessionId,
+                    roomCode: this.roomCode,
+                    isHost: isHost,
+                    isAdmin: (client.sessionId === this.state.adminId),
+                    gameStarted: this.state.gameStarted,
+                    maxQuestions: this.maxQuestions,
+                    mapName: this.mapName,
+                    timeLimit: this.timeLimit
+                });
+
+                return; // Stop here, player is back!
+            } catch (e) {
+                console.log(`[GameRoom] ${name} reconnection failed or timed out.`);
+            }
         }
 
-        this.broadcastPlayerList();
+        // --- If we reach here, it means either consented leave or reconnection failed ---
+        
+        // Clean up player data
+        this.state.players.delete(client.sessionId);
+        this.pendingClientAnswers.delete(client.sessionId);
+        
+        // If it was the host and they left PERMANENTLY (consented or reconnect timeout), close the room
+        if (isHost && !isUnconsented) {
+            console.log(`[GameRoom] Closing room because Host/Admin (ID: ${client.sessionId}) left PERMANENTLY.`);
+            this.broadcast("host_disconnected", { message: "Host telah meninggalkan permainan secara permanen. Room ditutup." });
+            this.disconnect();
+            return;
+        }
+
+        // Auto-end game if no real players left (only bots or admin)
+        if (this.state.gameStarted && this.state.players.size === 0) {
+            console.log("[GameRoom] No players left, ending game.");
+            this.endGame("Semua pemain keluar");
+        }
     }
     
     onDispose() {

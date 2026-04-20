@@ -69,8 +69,8 @@ export function drawCharacterSprite(ctx, x, y, config = {}) {
       ctx.textBaseline = "bottom";
       ctx.font = `${baseFontSize}px "Press Start 2P"`;
       
-      // Calculate layout positions from character top (y - dh/2)
-      const topOffset = y - (dh / 2) - (8 * scaleFactor);
+      // Lowered the entire UI cluster closer to the head
+      const topOffset = y - (dh / 2) + (50 * scaleFactor);
       
       // 1. Draw Name (Topmost)
       const nameY = topOffset - (14 * scaleFactor);
@@ -92,7 +92,11 @@ export function drawCharacterSprite(ctx, x, y, config = {}) {
       
       // Bar Progress (Green)
       ctx.fillStyle = "#4CAF50";
-      const progress = maxQuestions > 0 ? Math.min(1, answered / maxQuestions) : 0; 
+      // Progress increases based on correct answers (score)
+      const scorePerQuestion = GAME_CONFIG.SCORE_PER_QUESTION || 10;
+      const maxScore = maxQuestions * scorePerQuestion;
+      const currentScore = score !== null ? score : 0;
+      const progress = maxScore > 0 ? Math.min(1, currentScore / maxScore) : 0; 
       if (progress > 0) {
           ctx.fillRect(barX, barY, barW * progress, barH);
       }
@@ -102,15 +106,6 @@ export function drawCharacterSprite(ctx, x, y, config = {}) {
       ctx.lineWidth = 1 * scaleFactor;
       ctx.strokeRect(barX, barY, barW, barH);
 
-      // 3. Stats / PTS (Bottom of Cluster)
-      if (score !== null) {
-          const statsText = `${score} PTS (${answered}/${maxQuestions})`;
-          ctx.font = `${baseFontSize * 0.7}px "Press Start 2P"`; // Smaller font for stats
-          const statsY = topOffset + (2 * scaleFactor);
-          ctx.strokeText(statsText, x, statsY);
-          ctx.fillText(statsText, x, statsY);
-      }
-      
       ctx.restore();
     } else {
       ctx.fillStyle = "#2196F3";
@@ -130,6 +125,7 @@ export function drawPlayer(player, ctx, zoom = 1.0) {
         idleImage: player.idleImage,
         idleFrames: player.idleFrames || 9,
         runFrames: player.runFrames || 8,
+        score: player.score !== undefined ? player.score : null,
         answered: player.answeredQuestionsCount || 0,
         maxQuestions: player.maxQuestions || GAME_CONFIG.MAX_QUESTIONS,
         zoom: zoom

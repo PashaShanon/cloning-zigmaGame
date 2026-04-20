@@ -17,6 +17,7 @@
     "@colyseus/sdk": "^0.17.26",
     "colyseus.js": "^0.16.22",
     "express": "^5.2.1",
+    "lucide": "^1.8.0",
     "nipplejs": "^1.0.1",
     "phaser": "^3.90.0",
     "socket.io": "^4.8.3",

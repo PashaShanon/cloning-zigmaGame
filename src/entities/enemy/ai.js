@@ -39,23 +39,48 @@ export function updateEnemyAI(enemy, canvasWidth, canvasHeight, isInterrogated, 
         enemy.noticeTimer--;
         if (enemy.noticeTimer <= 0) {
             enemy.state = 'FLEE';
-            enemy.fleeTimer = 120;
+            enemy.fleeTimer = 180; // Run for 3 seconds
             enemy.animFrame = 0; // switch idle→run sheet
             enemy.tick = 0;
+            
+            // Pick target furthest from player
+            const target = findFurthestPointFromPlayer(enemy, player, gameMap);
+            enemy.targetX = target.x;
+            enemy.targetY = target.y;
         }
     }
 
     if (enemy.state === 'FLEE') {
         enemy.fleeTimer--;
-        const dx = enemy.x - player.x;
-        const dy = enemy.y - player.y;
+        
+        // Move towards target
+        const dx = enemy.targetX - enemy.x;
+        const dy = enemy.targetY - enemy.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
         
         const speed = enemy.speed * 2.5; 
-        if (dist > 0) {
+        if (dist > 10) {
             enemy.dx = (dx / dist) * speed;
             enemy.dy = (dy / dist) * speed;
+        } else {
+            enemy.dx = 0;
+            enemy.dy = 0;
+            enemy.state = 'TIRED';
+            enemy.tiredTimer = 120;
         }
+
+        // Re-evaluate if player gets too close
+        if (player) {
+            const pDx = enemy.x - player.x;
+            const pDy = enemy.y - player.y;
+            const pDist = Math.sqrt(pDx * pDx + pDy * pDy);
+            if (pDist < 100) {
+                const target = findFurthestPointFromPlayer(enemy, player, gameMap);
+                enemy.targetX = target.x;
+                enemy.targetY = target.y;
+            }
+        }
+        
         updateFacing(enemy);
 
         if (enemy.fleeTimer <= 0) {
@@ -282,5 +307,37 @@ export function checkCollision(enemy, x, y, gameMap) {
 export function updateFacing(enemy) {
     if (Math.abs(enemy.dx) < 0.1) return;
     enemy.facingLeft = (enemy.dx < 0);
-} 
+}
+
+/**
+ * Find a coordinate on the map furthest from the player that is not solid.
+ */
+function findFurthestPointFromPlayer(enemy, player, gameMap) {
+    if (!gameMap || !player) return { x: enemy.x, y: enemy.y };
+
+    const mapW = gameMap.width * (gameMap.tileWidth || gameMap.tileSize) * gameMap.scale;
+    const mapH = gameMap.height * (gameMap.tileHeight || gameMap.tileSize) * gameMap.scale;
+    
+    let bestTarget = { x: enemy.x, y: enemy.y };
+    let maxDist = -1;
+
+    // Sample points in a grid
+    const samples = 6;
+    for (let ix = 0; ix < samples; ix++) {
+        for (let iy = 0; iy < samples; iy++) {
+            const tx = (ix / (samples - 1)) * mapW;
+            const ty = (iy / (samples - 1)) * mapH;
+
+            if (!gameMap.isSolid(tx, ty)) {
+                const distToPlayer = Math.sqrt(Math.pow(tx - player.x, 2) + Math.pow(ty - player.y, 2));
+                if (distToPlayer > maxDist) {
+                    maxDist = distToPlayer;
+                    bestTarget = { x: tx, y: ty };
+                }
+            }
+        }
+    }
+    return bestTarget;
+}
+ 
 

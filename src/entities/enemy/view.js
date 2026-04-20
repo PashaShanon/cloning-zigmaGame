@@ -73,22 +73,27 @@ export function drawEnemy(enemy, ctx, assets, zoom = 1.0) {
           ctx.strokeStyle = `rgba(255, 220, 0, ${pulse})`;
           ctx.lineWidth = 2;
           ctx.stroke();
-      } else if (enemy.state === 'NOTICE') {
-          ctx.fillStyle = "red";
-          ctx.strokeStyle = "black";
-          ctx.lineWidth = 2;
-          ctx.font = `bold ${28 * (GAME_CONFIG.SCALE / 2 || 1)}px Arial`;
-          ctx.textAlign = "center";
-          const textY = enemy.y - dh/2 - 20;
-          ctx.strokeText("!", enemy.x, textY);
-          ctx.fillText("!", enemy.x, textY);
+      } 
+
+      // Label Styling (NOTICE/TIRED)
+      const baseFontSize = 8 * GAME_CONFIG.SCALE * scaleFactor;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+
+      if (enemy.state === 'NOTICE') {
+          const bubbleY = enemy.y - dh/2 - (15 * scaleFactor);
+          ctx.font = `bold ${baseFontSize * 2.5}px Arial`;
+          ctx.fillStyle = "#FF4444";
+          ctx.strokeStyle = "white";
+          ctx.lineWidth = 3 * scaleFactor;
+          ctx.strokeText("!", enemy.x, bubbleY);
+          ctx.fillText("!", enemy.x, bubbleY);
       } else if (enemy.state === 'TIRED') {
-          ctx.fillStyle = "white";
-          ctx.strokeStyle = "black";
-          ctx.lineWidth = 2;
-          ctx.font = `bold ${24 * (GAME_CONFIG.SCALE / 2 || 1)}px Arial`;
-          ctx.textAlign = "center";
-          const textY = enemy.y - dh/2 - 20;
+          const textY = enemy.y - dh/2 - (5 * scaleFactor);
+          ctx.font = `bold ${baseFontSize * 1.5}px "Press Start 2P"`;
+          ctx.fillStyle = "#4FC3F7";
+          ctx.strokeStyle = "white";
+          ctx.lineWidth = 2 * scaleFactor;
           ctx.strokeText("...", enemy.x, textY);
           ctx.fillText("...", enemy.x, textY);
       }

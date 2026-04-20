@@ -49,6 +49,8 @@ export class Player {
     this.isAttacking = false;
     this.attackCooldown = 0;
     this.isInterrogated = false;
+    this.score = 0;
+    this.maxQuestions = GAME_CONFIG.MAX_QUESTIONS;
 
     // Mouse listener for attacking
     window.addEventListener('mousedown', (e) => {

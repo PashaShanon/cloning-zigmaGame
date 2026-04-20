@@ -9,6 +9,10 @@
  * See: https://docs.colyseus.io/server/api/#constructor-options
  */
 import { listen } from "@colyseus/tools";
+import { Encoder } from "@colyseus/schema";
+
+// Increase default buffer size for large encoded states
+Encoder.BUFFER_SIZE = 64 * 1024; // 64 KB
 
 // Import Colyseus config
 import app from "./app.config.js";

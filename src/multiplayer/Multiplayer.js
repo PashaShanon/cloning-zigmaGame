@@ -21,6 +21,7 @@ export class MultiplayerManager {
         this.isHost = false;
         this.isAdmin = false;
         this.isConnected = false;
+        this.isReconnecting = false;
         /** @type {Map<string, {x,y,name,baseFrame,isMoving,score}>} */
         this.remotePlayers = new Map();
         this._prevPlayerKeys = new Set();
@@ -44,6 +45,9 @@ export class MultiplayerManager {
     }
 
     async createRoom(playerName, options = {}) {
+        // Force clear any old session tokens before creating a new world
+        this.clearSession();
+        
         if (!this.client) await this.connect();
         
         // Generate a random 6-character room code on client to ensure it's indexed correctly
@@ -63,11 +67,92 @@ export class MultiplayerManager {
         this.room.sessionId = this.room.sessionId; // Trigger getter
         this.sessionId = this.room.sessionId;
         this.isHost = true;
-        this._setupListeners();
+        this._setupListeners(this.room);
+        this.saveSession();
         return this.room.roomId;
     }
 
+    async tryReconnect() {
+        if (this.isConnected && this.room && this.room.connection.isOpen) {
+            console.log("[MP] Skipping tryReconnect: Already connected to an active room.");
+            return this.room;
+        }
+
+        const token = localStorage.getItem('reconnectionToken');
+        console.log("[MP] Reconnection check. Token exists:", !!token);
+        
+        if (!token) return null;
+        
+        if (!this.client) await this.connect();
+        
+        try {
+            this.isReconnecting = true;
+            console.log(`[MP] Attempting to reconnect using token: ${token.substring(0, 10)}...`);
+            this.room = await this.client.reconnect(token);
+            this.sessionId = this.room.sessionId;
+            // CRITICAL: Set room code immediately before listeners can trigger
+            // CRITICAL: Prioritize the code from URL or State over the long internal roomId
+            const urlCode = window.location.pathname.split('/')[2];
+            this.roomCode = this.room.state?.roomCode || urlCode || this.room.roomId;
+            this.isHost = (this.sessionId === this.room.state?.hostId);
+
+            this._setupListeners(this.room);
+            
+            console.log(`[MP] Reconnected successfully! Using Room Code: ${this.roomCode}`);
+            this.saveSession(); // Refresh token
+            
+            // MANUAL UI SYNC: Force update UI using the code we just determined
+            this.game.uiManager.onRoomJoined(this.roomCode, this.isHost, this.room.state);
+            
+            // Allow time for state to sync and UI to stabilize
+            if (this._reconTimeout) clearTimeout(this._reconTimeout);
+            this._reconTimeout = setTimeout(() => { 
+                this.isReconnecting = false; 
+                console.log("[MP] Reconnection cooldown finished.");
+            }, 2000);
+            
+            return this.room;
+        } catch (e) {
+            this.isReconnecting = false;
+            console.warn("[MP] Reconnection failed:", e.message);
+            
+            // CRITICAL: If seat is already reserved, don't clear the session!
+            // It just means we are already there.
+            if (e.message.toLowerCase().includes("expired") || e.message.toLowerCase().includes("reservation")) {
+                console.log("[MP] Seat already reserved, keeping session.");
+                return this.room;
+            }
+
+            this.clearSession();
+            return null;
+        }
+    }
+
+    saveSession() {
+        if (this.room) {
+            // In some versions it's room.reconnectionToken, in others it might be slightly different
+            const token = this.room.reconnectionToken;
+            if (token) {
+                localStorage.setItem('reconnectionToken', token);
+                console.log("[MP] Session saved with token:", token.substring(0, 10) + "...");
+            } else {
+                console.warn("[MP] Could not save session: reconnectionToken is missing on room object");
+            }
+        }
+    }
+
+    clearSession() {
+        console.log("[MP] Clearing session token");
+        localStorage.removeItem('reconnectionToken');
+    }
+
     async joinRoom(roomCode, playerName) {
+        this.clearSession();
+        if (this.isHost && this.room) {
+            console.warn("[MP] Already Host of a room, skipping joinRoom as player");
+            return this.room.roomId;
+        }
+
         if (!this.client) await this.connect();
         
         const codeToFind = roomCode.trim().toUpperCase();
@@ -80,14 +165,16 @@ export class MultiplayerManager {
             isHost: false // Explicitly joining as a player
         });
         
+        this.roomCode = codeToFind;
         this.sessionId = this.room.sessionId;
         this.isHost = false;
-        this._setupListeners();
+        this._setupListeners(this.room);
+        this.saveSession();
         return this.room.roomId;
     }
 
-    _setupListeners() {
-        const room = this.room;
+    _setupListeners(room) {
+        if (!room) return;
 
         // ── Sent by server right after join ─────────────────────
         room.onMessage("player_attack", (data) => {
@@ -101,11 +188,28 @@ export class MultiplayerManager {
         });
         
         room.onMessage("joined", (data) => {
-            this.sessionId = this.room.sessionId; // Use authoritative ID
+            console.log("[MP] 'joined' message received. isReconnecting:", this.isReconnecting);
+            this.sessionId = room.sessionId; 
             this.roomCode  = data.roomCode;
             this.isHost    = data.isHost;
             this.isAdmin   = data.isAdmin;
+            
+            // Always trigger UI update to refresh player list and room code.
+            // UIManager will handle skipping navigation if already in correct path.
             this.game.uiManager.onRoomJoined(this.roomCode, this.isHost, data);
+            
+            if (this.isReconnecting) {
+                console.log("[MP] Reconnection UI sync completed via server message.");
+            }
+        });
+
+        room.onMessage("host_disconnected", (data) => {
+            console.log("[MP] Host disconnected message received:", data.message);
+            this.game.uiManager.showNotification(data.message, 'error');
+            setTimeout(() => {
+                this.disconnect();
+                this.game.uiManager.navigateTo('/');
+            }, 2000);
         });
 
         // ── Full state sync (replaces reactive schema callbacks) ─
@@ -116,8 +220,8 @@ export class MultiplayerManager {
             // console.log("[MP] State update received");
 
             // Force authoritative sessionId from the room object itself if local one is missing
-            if (!this.sessionId && this.room?.sessionId) {
-                this.sessionId = this.room.sessionId;
+            if (!this.sessionId && room?.sessionId) {
+                this.sessionId = room.sessionId;
             }
 
             // Handle host updates
@@ -157,7 +261,7 @@ export class MultiplayerManager {
 
             if (state.players) {
                 try {
-                    this._syncPlayers(state.players);
+                    this._syncPlayers(state.players, room);
                 } catch (e) { console.error("[MP] Player sync error:", e); }
             }
         });
@@ -168,9 +272,9 @@ export class MultiplayerManager {
             this.game.uiManager.showPreGameCountdown(() => {
                 // Determine view based on host/admin status
                 if (this.isAdmin) {
-                   this.game.uiManager.navigateTo('/host/progress');
+                   this.game.uiManager.navigateTo(`/host/${this.roomCode || "000000"}/progress`);
                 } else {
-                   this.game.uiManager.navigateTo('/game');
+                   this.game.uiManager.navigateTo(`/game/${this.roomCode || "000000"}`);
                 }
                 
                 this.game.startMultiplayer();
@@ -228,16 +332,27 @@ export class MultiplayerManager {
 
         // ── Error & disconnect ────────────────────────────────────
         room.onError((code, message) => {
-            console.error("[MP] Error:", code, message);
-            this.game.uiManager.showNotification(`Error: ${message}`, "error");
+            if (this.isReconnecting) return; // Skip error UI during reconnect attempts
+            console.error("[MP] Room Error:", code, message);
+            this.game.uiManager.showNotification(`Error Multiplayer (${code}): ${message}`, "error");
         });
 
-        room.onLeave(() => {
-            this.game.uiManager.showNotification("Terputus dari server");
+        room.onLeave((code) => {
+            console.log(`[MP] Left room with code: ${code}. isReconnecting: ${this.isReconnecting}`);
+            
+            // Only show notification if it's an abnormal disconnect and we aren't currently reconnecting
+            if (!this.isReconnecting && code !== 1000) {
+                this.game.uiManager.showNotification(`Koneksi terputus (Code: ${code})`, "error");
+            }
+            
+            this.isConnected = false;
         });
 
         // Tell server we are ready for the "joined" initial data
-        room.send("join_ready", {});
+        // BUT only if we aren't reconnecting (reconnect state is already ready)
+        if (!this.isReconnecting) {
+            room.send("join_ready", {});
+        }
     }
 
     /** Sync server enemies to game instance */
@@ -275,7 +390,7 @@ export class MultiplayerManager {
     /**
      * Syncs player list from raw state.players (plain Map from Colyseus).
      */
-    _syncPlayers(players) {
+    _syncPlayers(players, room) {
         const currentKeys = new Set();
 
         // `players` comes as a plain JS object or Map depending on Colyseus version
@@ -331,6 +446,10 @@ export class MultiplayerManager {
                 // Sync our own score
                 if (typeof p.score === "number") {
                     this.game.score = p.score;
+                    if (this.game.player) {
+                        this.game.player.score = p.score;
+                        this.game.player.maxQuestions = this.game.maxQuestions || 5;
+                    }
                 }
                 continue;
             }
@@ -370,6 +489,14 @@ export class MultiplayerManager {
             if (!currentKeys.has(id)) this.remotePlayers.delete(id);
         }
 
+        // AUTHORITATIVE REMOVAL: Remove players who are no longer on the server
+        for (const [id] of this.remotePlayers) {
+            if (!currentKeys.has(id)) {
+                console.log(`[MP] Player ${id} left server, removing local proxy.`);
+                this.remotePlayers.delete(id);
+            }
+        }
+
         // Build player list for lobby UI (all players including self)
         const list = validEntries
             .map(([id, p]) => ({
@@ -379,11 +506,15 @@ export class MultiplayerManager {
                 score:   (p && p.score) || 0
             }));
         
-        // Only update UI if game.uiManager exists and we're in lobby
-        if (this.game.uiManager && this.game.uiManager.updateLobbyList) {
+        // Notify UI to update player list
+        if (this.game.uiManager) {
             try {
-                this.game.uiManager.updateLobbyList(list, this.room.state.hostId, this.sessionId);
-            } catch (e) { console.error("[MP] updateLobbyList error:", e); }
+                // Use a safe check for room state
+                const hostId = room?.state?.hostId || this.room?.state?.hostId;
+                this.game.uiManager.updateLobbyList(list, hostId, this.sessionId);
+            } catch (e) {
+                console.warn("[MP] updateLobbyList error:", e);
+            }
         }
     }
 
@@ -468,10 +599,26 @@ export class MultiplayerManager {
         });
     }
 
-    disconnect() {
-        this.room?.leave();
+    /**
+     * Disconnects from the current room.
+     * @param {boolean} consented - If true, the server will not wait for reconnection.
+     */
+    disconnect(consented = true) {
+        if (this.room) {
+            console.log(`[MP] Disconnecting. Consented: ${consented}`);
+            if (consented) {
+                try {
+                   this.room.send("player_exit"); // Tell server to remove us IMMEDIATELY
+                } catch(e) {}
+            }
+            this.room.leave(consented);
+        }
         this.room = null;
         this.remotePlayers.clear();
         this.isConnected = false;
+        
+        if (consented) {
+            this.clearSession();
+        }
     }
 }
