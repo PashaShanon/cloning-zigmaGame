@@ -45,6 +45,9 @@ export class Game {
     this.isAdminMode = false;
     this.showEnemies = true;
     this.gameLoopId = null;
+    this.cameraX = 0;
+    this.cameraY = 0;
+    this.cameraZoom = 1.0;
     
     this.init();
   }
@@ -139,6 +142,10 @@ export class Game {
     // Clamp camera to map bounds
     this.cameraX = Math.max(0, Math.min(targetX, mapWidth - this.canvas.width));
     this.cameraY = Math.max(0, Math.min(targetY, mapHeight - this.canvas.height));
+
+    // CRITICAL: Protect against NaN cascading via invalid player positions
+    if (isNaN(this.cameraX)) this.cameraX = 0;
+    if (isNaN(this.cameraY)) this.cameraY = 0;
 
     // If map is smaller than canvas, center it
     if (mapWidth < this.canvas.width) {
@@ -241,6 +248,9 @@ export class Game {
         } else {
             this.mobileController.hide();
         }
+        
+        // CRITICAL: Ensure the game loop actually turns on to draw!
+        this.gameLoop();
       } else {
         setTimeout(waitForMap, 100);
       }

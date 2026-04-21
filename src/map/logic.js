@@ -6,12 +6,15 @@ export async function initMap(map, tmxData) {
         // 1. Load tileset images
         const loadPromises = map.tilesetsInfo.map(ts => {
           return new Promise((resolve) => {
-            ts.img.src = ts.src;
+            if (ts.img.complete && ts.img.src && ts.img.src.endsWith(ts.src.split('/').pop())) {
+                return resolve(); 
+            }
             ts.img.onload = () => resolve();
             ts.img.onerror = () => {
               console.error("Failed to load map tileset:", ts.src);
               resolve(); 
-            }
+            };
+            ts.img.src = ts.src;
           });
         });
 

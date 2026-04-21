@@ -101,8 +101,29 @@ export class MultiplayerManager {
             console.log(`[MP] Reconnected successfully! Using Room Code: ${this.roomCode}`);
             this.saveSession(); // Refresh token
             
-            // MANUAL UI SYNC: Force update UI using the code we just determined
-            this.game.uiManager.onRoomJoined(this.roomCode, this.isHost, this.room.state);
+            // MANUAL UI SYNC: Rely on the 'joined' message from server to prevent race conditions
+            // where this.room.state is not fully populated yet.
+            
+            // MANUAL STATE SYNC: Immediately pull critical data required for rendering (e.g. mapName)
+            if (this.room.state) {
+                if (this.room.state.mapName && this.room.state.mapName !== this.game.mapName) {
+                    this.game.mapName = this.room.state.mapName;
+                    this.game.map.loadMap(this.game.mapName);
+                }
+                if (this.room.state.clock !== undefined) {
+                    this.game.timeRemaining = this.room.state.clock;
+                }
+                if (this.room.state.players) {
+                    try {
+                        this._syncPlayers(this.room.state.players, this.room);
+                    } catch (e) {}
+                }
+                if (this.room.state.enemies) {
+                    try {
+                        this._syncEnemies(this.room.state.enemies);
+                    } catch (e) {}
+                }
+            }
             
             // Allow time for state to sync and UI to stabilize
             if (this._reconTimeout) clearTimeout(this._reconTimeout);

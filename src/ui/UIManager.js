@@ -257,7 +257,9 @@ export class UIManager {
                   console.log("[Router] Session restored via reconnect");
                   
                   // Start game engine if it's the game or progress view
-                  if (isGame || isProgress) {
+                  const isGamePath = window.location.pathname.includes('/game');
+                  const isProgressPath = window.location.pathname.includes('/progress');
+                  if (isGamePath || isProgressPath) {
                       this.game.startMultiplayer(room, room.state.hostId === room.sessionId);
                   }
                   return; 
